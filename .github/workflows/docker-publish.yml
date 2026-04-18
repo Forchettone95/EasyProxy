@@ -1,7 +1,10 @@
-name: Build and Push Docker image to GHCR
+name: Build and Push Docker images to GHCR
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["main"]
+    tags: ["v*.*.*"]
 
 env:
   REGISTRY: ghcr.io
@@ -10,6 +13,16 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - dockerfile: Dockerfile.full
+            tag_name: full
+            alias_latest: true
+          - dockerfile: Dockerfile.light
+            tag_name: light
+            alias_latest: false
+
     permissions:
       contents: read
       packages: write
@@ -31,24 +44,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=ref,event=branch
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./${{ matrix.dockerfile }}
           push: true
-          platforms: linux/amd64,linux/arm64   # ← supporto entrambe le architetture
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.tag_name }}
+            ${{ matrix.alias_latest && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
