@@ -379,26 +379,43 @@ class HLSProxy:
             await asyncio.sleep(60) # Check every minute
 
     async def _update_latest_version(self):
-        """Checks GitHub config.py for the latest version."""
+        """Periodically checks GitHub for the latest version in the background."""
+        while True:
+            await self._refresh_latest_version()
+            # Check every hour in background
+            await asyncio.sleep(3600)
+
+    async def _refresh_latest_version(self):
+        """Checks GitHub config.py for the latest version with cache busting.
+        Can be called on-demand (e.g. on page refresh).
+        """
         try:
-            url = "https://raw.githubusercontent.com/realbestia1/EasyProxy/main/config.py"
-            # We use a direct session for this
+            # Use a timestamp to bypass GitHub's cache
+            cache_buster = int(time.time())
+            url = f"https://raw.githubusercontent.com/realbestia1/EasyProxy/main/config.py?t={cache_buster}"
+            
+            # Use a direct session with a short timeout to not block UI too long
             session = await self._get_session()
-            async with session.get(url, timeout=5) as resp:
+            async with session.get(url, timeout=2) as resp:
                 if resp.status == 200:
                     text = await resp.text()
                     # Use regex to find APP_VERSION = "..." or '...'
                     match = re.search(r'APP_VERSION\s*=\s*["\']([^"\']+)["\']', text)
                     if match:
-                        self.latest_version = match.group(1)
-                        logger.info(f"🆕 Latest version detected in GitHub config.py: {self.latest_version}")
+                        new_version = match.group(1)
+                        if self.latest_version != new_version:
+                            self.latest_version = new_version
+                            logger.info(f"🆕 Latest version updated: {self.latest_version}")
                     else:
-                        self.latest_version = "Unknown"
+                        if self.latest_version == "Checking...":
+                            self.latest_version = "Unknown"
                 else:
-                    self.latest_version = "Error"
+                    if self.latest_version == "Checking...":
+                        self.latest_version = "Error"
         except Exception as e:
-            logger.warning(f"⚠️ Failed to check latest version from GitHub config: {e}")
-            self.latest_version = "Unknown"
+            if self.latest_version == "Checking...":
+                self.latest_version = "Unknown"
+            logger.debug(f"Version check skipped or failed: {e}")
 
     @staticmethod
     def _strip_fake_png_header_from_ts(content: bytes) -> bytes:
@@ -2744,6 +2761,9 @@ class HLSProxy:
     async def handle_root(self, request):
         """Serve la pagina principale index.html."""
         try:
+            # Refresh version on each page load
+            await self._refresh_latest_version()
+            
             html_content = self._read_template("index.html")
             
             # Determine version status class
@@ -2819,6 +2839,9 @@ class HLSProxy:
     async def handle_info_page(self, request):
         """Serve la pagina HTML delle informazioni."""
         try:
+            # Refresh version on each page load
+            await self._refresh_latest_version()
+            
             html_content = self._read_template("info.html")
 
             # Determine version status class
@@ -2859,6 +2882,9 @@ class HLSProxy:
 
     async def handle_api_info(self, request):
         """Endpoint API che restituisce le informazioni sul server in formato JSON."""
+        # Refresh version on API call
+        await self._refresh_latest_version()
+        
         info = {
             "proxy": "HLS Proxy Server",
             "version": APP_VERSION,  # Aggiornata per supporto AES-128
