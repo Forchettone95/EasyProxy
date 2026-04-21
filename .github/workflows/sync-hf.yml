@@ -13,4 +13,4 @@ jobs:
  - name: Request Factory Rebuild
  run: |
  curl -X POST \ -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" \
- "https://huggingface.co/api/spaces/HF_USERNAME/HF_SPACE/restart?factory=true”
+ "https://huggingface.co/api/spaces/HF_USERNAME/HF_SPACE/restart?factory=true"
