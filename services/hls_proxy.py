@@ -2347,6 +2347,14 @@ class HLSProxy:
                         await response.write(chunk)
                     await response.write_eof()
                     return response
+                except (ClientPayloadError, ConnectionResetError, OSError) as e:
+                    logger.info(
+                        "Segment stream interrupted for %s [%s]: %s",
+                        segment_name,
+                        type(e).__name__,
+                        e,
+                    )
+                    return response
                 except Exception as e:
                     if "Connection lost" not in str(e) and "closing transport" not in str(e):
                         logger.error(f"Error streaming segment {segment_name}: {str(e)}")
@@ -2648,6 +2656,15 @@ class HLSProxy:
                     try:
                         async for chunk in resp.content.iter_any():
                             await response.write(chunk)
+                        await response.write_eof()
+                        return response
+                    except (ClientPayloadError, ConnectionResetError, OSError) as e:
+                        logger.info(
+                            "Stream relay interrupted for %s [%s]: %s",
+                            stream_url,
+                            type(e).__name__,
+                            e,
+                        )
                         return response
                     except Exception as e:
                         if "Connection lost" not in str(e) and "closing transport" not in str(e):
