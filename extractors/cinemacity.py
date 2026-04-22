@@ -108,6 +108,19 @@ class CinemaCityExtractor:
             if depth == 0: return decoded[start:i+1]
         return None
 
+    def _collect_file_entries(self, items) -> list[dict]:
+        entries = []
+        if isinstance(items, list):
+            for item in items:
+                entries.extend(self._collect_file_entries(item))
+        elif isinstance(items, dict):
+            if isinstance(items.get("file"), str) and items.get("file"):
+                entries.append(items)
+            folder = items.get("folder")
+            if isinstance(folder, list):
+                entries.extend(self._collect_file_entries(folder))
+        return entries
+
     def pick_stream(self, file_data, media_type: str, season: int = 1, episode: int = 1) -> Optional[str]:
         if isinstance(file_data, str): return file_data
         if isinstance(file_data, list):
@@ -131,7 +144,8 @@ class CinemaCityExtractor:
             if not selected_season: return None
 
             selected_ep = None
-            for e in selected_season:
+            episode_candidates = self._collect_file_entries(selected_season)
+            for e in episode_candidates:
                 if not isinstance(e, dict) or "file" not in e: continue
                 title = e.get('title', "").lower()
                 if re.search(rf"(?:episode|episodio|e)\s*0*{episode}\b", title, re.I):
@@ -139,11 +153,12 @@ class CinemaCityExtractor:
                     break
             if not selected_ep:
                 idx = max(0, int(episode) - 1)
-                ep_data = selected_season[idx] if idx < len(selected_season) else selected_season[0]
-                selected_ep = ep_data.get('file')
+                if episode_candidates:
+                    ep_data = episode_candidates[idx] if idx < len(episode_candidates) else episode_candidates[0]
+                    selected_ep = ep_data.get('file')
             
             if selected_ep:
-                logger.info(f"CinemaCity: Selected S{season}E{episode} -> {selected_ep[:50]}...")
+                logger.debug(f"CinemaCity: Selected S{season}E{episode} -> {selected_ep[:50]}...")
             else:
                 logger.warning(f"CinemaCity: Failed to find S{season}E{episode} in file_data")
             
@@ -154,8 +169,14 @@ class CinemaCityExtractor:
         session = await self._get_session()
         cookies = self.get_session_cookies()
         
-        # Get params from kwargs or URL query
-        media_type = kwargs.get('type', 'movie')
+        # Get params from kwargs or infer from URL/query
+        media_type = kwargs.get('type')
+        if not media_type:
+            lowered_url = url.lower()
+            if "/tv-series/" in lowered_url or "/serie-tv/" in lowered_url:
+                media_type = "series"
+            else:
+                media_type = "movie"
         
         # Try to extract s/e from URL if not in kwargs
         url_params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
@@ -165,6 +186,8 @@ class CinemaCityExtractor:
         
         season = int(s_val) if str(s_val).isdigit() else 1
         episode = int(e_val) if str(e_val).isdigit() else 1
+        if media_type == "movie" and (url_params.get('s') or url_params.get('season') or url_params.get('e') or url_params.get('episode')):
+            media_type = "series"
 
         headers = {
             "User-Agent": self.user_agent,
@@ -198,16 +221,19 @@ class CinemaCityExtractor:
                 try:
                     file_data = json.loads(decoded)
                     if file_data: break
-                except: pass
+                except json.JSONDecodeError:
+                    pass
             
             raw_json = self.extract_json_array(decoded)
             if raw_json:
                 try:
                     clean = re.sub(r'\\(.)', r'\1', raw_json)
                     file_data = json.loads(clean)
-                except:
-                    try: file_data = json.loads(raw_json)
-                    except: pass
+                except json.JSONDecodeError:
+                    try:
+                        file_data = json.loads(raw_json)
+                    except json.JSONDecodeError:
+                        pass
                 if file_data: break
             
             file_match = re.search(r'(?:file|sources)\s*:\s*["\'](.*?)["\']', decoded, re.I)
@@ -241,12 +267,23 @@ class CinemaCityExtractor:
         clean_cookies = clean_cookies.strip().rstrip(';')
 
         # mediaflow_endpoint will determine how to handle the stream
+        # Use player_referer (player.php iframe URL) — CDN validates this, not the page URL
+        try:
+            origin = urllib.parse.urlparse(url)
+            origin_str = f"{origin.scheme}://{origin.netloc}"
+        except Exception:
+            origin_str = self.base_url
+
         return {
             "destination_url": safe_url,
             "request_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Referer": url,
-                "Cookie": clean_cookies
+                "Referer": player_referer,
+                "Origin": origin_str,
+                "Cookie": clean_cookies,
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Connection": "keep-alive"
             },
             "mediaflow_endpoint": "hls_manifest_proxy" if ".m3u8" in safe_url else "proxy_stream_endpoint"
         }

@@ -205,8 +205,10 @@ class MixdropExtractor:
 
         finally:
             if session_id:
-                try: await self._request_flaresolverr("sessions.destroy", session_id=session_id)
-                except: pass
+                try:
+                    await self._request_flaresolverr("sessions.destroy", session_id=session_id)
+                except Exception:
+                    pass
 
     async def close(self):
         if self.session and not self.session.closed:

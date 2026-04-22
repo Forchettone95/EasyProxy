@@ -5,6 +5,9 @@ SETLOCAL EnableDelayedExpansion
 echo Starting EasyProxy FULL Auto-Setup...
 echo =====================================
 
+set "FLARESOLVERR_PORT=8191"
+set "BYPARR_PORT=8192"
+
 :: --- 1. Set Environment ---
 :: Clean __pycache__ folders to prevent import issues
 for /d /r . %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
@@ -48,16 +51,27 @@ IF NOT EXIST "byparr\" (
 echo Starting Solvers in background...
 
 IF EXIST "flaresolverr\src\flaresolverr.py" (
-    echo [OK] Starting FlareSolverr on port 8191...
-    set PORT=8191
-    start "FlareSolverr" /MIN python "flaresolverr\src\flaresolverr.py"
+    powershell -NoProfile -Command ^
+        "$resp = $null; try { $resp = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%FLARESOLVERR_PORT%/' -TimeoutSec 3 } catch {}; " ^
+        "if ($resp -and $resp.Content -match 'FlareSolverr') { exit 0 } else { exit 1 }" >nul 2>&1
+    IF ERRORLEVEL 1 (
+        echo [OK] Starting FlareSolverr on port %FLARESOLVERR_PORT%...
+        set PORT=%FLARESOLVERR_PORT%
+        start "FlareSolverr" /MIN python "flaresolverr\src\flaresolverr.py"
+    ) ELSE (
+        echo [OK] FlareSolverr already active on port %FLARESOLVERR_PORT%.
+    )
 )
 
 IF EXIST "byparr\main.py" (
-    echo [OK] Starting Byparr on port 8192...
-    set PORT=8192
-    set BYPARR_PORT=8192
-    start "Byparr" /MIN python "byparr\main.py"
+    powershell -NoProfile -Command "exit $(if (Test-NetConnection -ComputerName '127.0.0.1' -Port %BYPARR_PORT% -InformationLevel Quiet) { 0 } else { 1 })" >nul 2>&1
+    IF ERRORLEVEL 1 (
+        echo [OK] Starting Byparr on port %BYPARR_PORT%...
+        set PORT=%BYPARR_PORT%
+        start "Byparr" /MIN python "byparr\main.py"
+    ) ELSE (
+        echo [OK] Byparr already active on port %BYPARR_PORT%.
+    )
 )
 
 :: --- 6. Start EasyProxy ---
@@ -66,8 +80,8 @@ echo Starting EasyProxy Main App...
 echo -------------------------------------
 :: Reset PORT for main app
 set PORT=7860
-set FLARESOLVERR_URL=http://localhost:8191
-set BYPARR_URL=http://localhost:8192
+set FLARESOLVERR_URL=http://localhost:%FLARESOLVERR_PORT%
+set BYPARR_URL=http://localhost:%BYPARR_PORT%
 
 python app.py
 pause
