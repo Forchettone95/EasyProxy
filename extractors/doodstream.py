@@ -44,10 +44,13 @@ class DoodStreamExtractor:
         self.cache = CookieCache("dood")
         self.proxy_manager = FreeProxyManager.get_instance(
             "dood",
-            os.environ.get(
-                "DOOD_FREE_PROXY_URL",
-                "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/all/data.txt",
-            ),
+            [
+                os.environ.get(
+                    "DOOD_FREE_PROXY_URL",
+                    "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/all/data.txt",
+                ),
+                "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text"
+            ],
             cache_ttl=int(os.environ.get("DOOD_FREE_PROXY_CACHE_TTL", "1800")),
             max_fetch=_FREE_PROXY_MAX_FETCH,
             max_good=_FREE_PROXY_MAX_GOOD,
