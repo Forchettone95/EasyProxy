@@ -54,19 +54,15 @@ class DeltabitExtractor:
             "maxTimeout": (settings.flaresolverr_timeout + 60) * 1000,
         }
         fs_headers = {}
-        
-        # Determine proxy based on URL if provided, or use a default for session creation
-        proxy_url = url or "https://deltabit.co"
-        proxy = get_proxy_for_url(proxy_url, TRANSPORT_ROUTES, self.proxies, bypass_warp=current_bypass)
-        
-        if proxy:
-            payload["proxy"] = {"url": proxy}
-            solver_proxy = get_solver_proxy_url(proxy)
-            fs_headers["X-Proxy-Server"] = solver_proxy
-            logger.debug(f"Deltabit: Using proxy for {cmd}: {solver_proxy} (bypass_warp={current_bypass})")
-
-        if url and cmd.startswith("request."): 
+        if url: 
             payload["url"] = url
+            # Determina dinamicamente il proxy per questo specifico URL
+            proxy = get_proxy_for_url(url, TRANSPORT_ROUTES, self.proxies, bypass_warp=current_bypass)
+            if proxy:
+                payload["proxy"] = {"url": proxy}
+                solver_proxy = get_solver_proxy_url(proxy)
+                fs_headers["X-Proxy-Server"] = solver_proxy
+                logger.debug(f"Deltabit: Passing explicit proxy to solver: {solver_proxy} (bypass_warp={current_bypass})")
 
         if post_data: payload["postData"] = post_data
         if session_id: payload["session"] = session_id
@@ -100,6 +96,7 @@ class DeltabitExtractor:
                 self.bypass_warp_active = val.lower() in ("true", "1", "on", "yes")
             else:
                 self.bypass_warp_active = bool(val)
+            logger.debug(f"Deltabit: bypass_warp_active updated from kwargs to {self.bypass_warp_active}")
         
         # 1. Handle redirectors (safego.cc, clicka.cc, etc.)
         if any(d in url.lower() for d in ["safego.cc", "clicka.cc", "clicka"]):
@@ -116,7 +113,7 @@ class DeltabitExtractor:
         
         session_id = None
         try:
-            # Start session
+            # Start session for better performance (persistence of cookies/browser state)
             sess_res = await self._request_flaresolverr("sessions.create")
             session_id = sess_res.get("session")
 
