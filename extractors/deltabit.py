@@ -89,13 +89,18 @@ class DeltabitExtractor:
 
     async def extract(self, url: str, **kwargs) -> dict:
         """Extract Deltabit URL using a unified FlareSolverr session if needed."""
-        # Respect bypass_warp from kwargs if provided
-        if "bypass_warp" in kwargs:
-            val = kwargs["bypass_warp"]
-            if isinstance(val, str):
-                self.bypass_warp_active = val.lower() in ("true", "1", "on", "yes")
+        # Respect bypass_warp or warp from kwargs if provided
+        target_warp = kwargs.get("bypass_warp") or kwargs.get("warp")
+        if target_warp is not None:
+            if isinstance(target_warp, str):
+                self.bypass_warp_active = target_warp.lower() in ("true", "1", "on", "yes", "off")
+                # Special case for "off" string
+                if target_warp.lower() == "off":
+                    self.bypass_warp_active = True
+                elif target_warp.lower() in ("on", "true", "1"):
+                    self.bypass_warp_active = False
             else:
-                self.bypass_warp_active = bool(val)
+                self.bypass_warp_active = bool(target_warp)
             logger.debug(f"Deltabit: bypass_warp_active updated from kwargs to {self.bypass_warp_active}")
         
         # 1. Handle redirectors (safego.cc, clicka.cc, etc.)
