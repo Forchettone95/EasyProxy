@@ -2,7 +2,8 @@ import aiohttp
 import logging
 import asyncio
 from typing import Optional, Dict, Any
-from config import FLARESOLVERR_URL, FLARESOLVERR_TIMEOUT, get_proxy_for_url, TRANSPORT_ROUTES, GLOBAL_PROXIES, get_connector_for_proxy
+from urllib.parse import urlparse
+from config import FLARESOLVERR_URL, FLARESOLVERR_TIMEOUT, get_proxy_for_url, TRANSPORT_ROUTES, GLOBAL_PROXIES, get_connector_for_proxy, get_solver_proxy_url
 from aiohttp_socks import ProxyConnector
 import yarl
 
@@ -14,12 +15,22 @@ try:
 except ImportError:
     HAS_CURL_CFFI = False
 
-async def smart_request(cmd: str, url: str, headers: Optional[Dict] = None, post_data: Optional[str] = None, proxies: Optional[list] = None) -> Any:
+async def smart_request(
+    cmd: str,
+    url: str,
+    headers: Optional[Dict] = None,
+    post_data: Optional[str] = None,
+    proxies: Optional[list] = None,
+    bypass_warp: bool = None,
+    wait: int = 0,
+) -> Any:
     """
     Effettua una richiesta intelligente: prova la via diretta, poi curl_cffi, e se fallisce usa FlareSolverr.
     """
     current_proxies = proxies or GLOBAL_PROXIES
-    proxy = get_proxy_for_url(url, TRANSPORT_ROUTES, current_proxies)
+    proxy = get_proxy_for_url(
+        url, TRANSPORT_ROUTES, current_proxies, bypass_warp=bypass_warp
+    )
     
     headers = headers or {}
     if "User-Agent" not in headers and "user-agent" not in headers:
@@ -49,7 +60,7 @@ async def smart_request(cmd: str, url: str, headers: Optional[Dict] = None, post
             cookie_jar=aiohttp.CookieJar(unsafe=True),
         ) as session:
             method = session.get if cmd.lower() == "request.get" else session.post
-            async with method(url, headers=headers, data=post_data, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            async with method(url, headers=headers, data=post_data, ssl=False, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status == 200:
                     content = await resp.text()
                     if not any(marker in content.lower() for marker in CF_MARKERS):
@@ -79,7 +90,7 @@ async def smart_request(cmd: str, url: str, headers: Optional[Dict] = None, post
                 if "user-agent" in curl_headers: del curl_headers["user-agent"]
                 
                 c_method = s.get if cmd.lower() == "request.get" else s.post
-                c_resp = await c_method(url, headers=curl_headers, data=post_data, proxies=curl_proxies, timeout=30)
+                c_resp = await c_method(url, headers=curl_headers, data=post_data, proxies=curl_proxies, verify=False, timeout=30)
                 
                 if c_resp.status_code == 200:
                     # Restituiamo sempre lo stesso formato dizionario
@@ -100,27 +111,48 @@ async def smart_request(cmd: str, url: str, headers: Optional[Dict] = None, post
     # ✅ FIX: Estrai i cookie dagli header per passarli a FlareSolverr
     fs_cookies = []
     cookie_header = headers.get("Cookie") or headers.get("cookie")
+    parsed_target = urlparse(url)
+    cookie_domain = parsed_target.hostname or ""
+    cookie_secure = parsed_target.scheme == "https"
     if cookie_header:
         for cookie_item in cookie_header.split(";"):
             if "=" in cookie_item:
                 k, v = cookie_item.strip().split("=", 1)
-                fs_cookies.append({"name": k, "value": v})
+                fs_cookies.append(
+                    {
+                        "name": k,
+                        "value": v,
+                        "domain": f".{cookie_domain.split('.')[-2]}.{cookie_domain.split('.')[-1]}" if len(cookie_domain.split('.')) >= 2 else cookie_domain,
+                        "path": "/",
+                        "secure": cookie_secure,
+                    }
+                )
 
     payload = {
         "cmd": cmd,
         "url": url,
         "maxTimeout": (FLARESOLVERR_TIMEOUT + 60) * 1000,
     }
+    # FlareSolverr v2/v3 doesn't support 'headers' anymore and it can cause issues.
+    # It handles its own headers through browser impersonation.
     if fs_cookies: payload["cookies"] = fs_cookies
     if post_data: payload["postData"] = post_data
+    
+    # Add wait parameter if specified
+    if wait > 0:
+        payload["wait"] = wait
     if proxy:
         payload["proxy"] = {"url": proxy}
+        headers_for_fs = {"X-Proxy-Server": get_solver_proxy_url(proxy)}
+    else:
+        headers_for_fs = {}
 
     async with aiohttp.ClientSession() as fs_session:
         try:
             async with fs_session.post(
                 endpoint,
                 json=payload,
+                headers=headers_for_fs,
                 timeout=aiohttp.ClientTimeout(total=FLARESOLVERR_TIMEOUT + 95),
             ) as resp:
                 if resp.status == 200:

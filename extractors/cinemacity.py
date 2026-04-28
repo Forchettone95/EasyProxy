@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from aiohttp_socks import ProxyConnector
-from config import FLARESOLVERR_URL, FLARESOLVERR_TIMEOUT, get_proxy_for_url, TRANSPORT_ROUTES, GLOBAL_PROXIES, get_connector_for_proxy
+from config import FLARESOLVERR_URL, FLARESOLVERR_TIMEOUT, get_proxy_for_url, TRANSPORT_ROUTES, GLOBAL_PROXIES, get_connector_for_proxy, get_solver_proxy_url
 from utils.smart_request import smart_request
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,13 @@ class CinemaCityExtractor:
     async def _get_session(self):
         if self.session is None or self.session.closed:
             timeout = ClientTimeout(total=60, connect=30, sock_read=30)
-            proxy = get_proxy_for_url(self.base_url, TRANSPORT_ROUTES, self.proxies)
+            proxy = get_proxy_for_url(
+                self.base_url, TRANSPORT_ROUTES, self.proxies, bypass_warp=True
+            )
+            if proxy:
+                logger.debug("CinemaCity routing: PROXY (%s)", proxy)
+            else:
+                logger.debug("CinemaCity routing: DIRECT (WARP excluded host / real IP)")
             connector = get_connector_for_proxy(proxy) if proxy else TCPConnector(limit=0, use_dns_cache=True)
             self.session = ClientSession(timeout=timeout, connector=connector, headers={'User-Agent': self.user_agent})
         return self.session
@@ -52,14 +58,18 @@ class CinemaCityExtractor:
             "cmd": cmd,
             "maxTimeout": (self.flaresolverr_timeout + 60) * 1000,
         }
+        fs_headers = {}
         if url: 
             payload["url"] = url
             # Determina dinamicamente il proxy per questo specifico URL
-            proxy = get_proxy_for_url(url, TRANSPORT_ROUTES, self.proxies)
+            proxy = get_proxy_for_url(
+                url, TRANSPORT_ROUTES, self.proxies, bypass_warp=True
+            )
             if proxy:
-                # FlareSolverr richiede il proxy nel formato {"url": "..."}
                 payload["proxy"] = {"url": proxy}
-                logger.debug(f"CinemaCity: Passing proxy to FlareSolverr: {proxy}")
+                solver_proxy = get_solver_proxy_url(proxy)
+                fs_headers["X-Proxy-Server"] = solver_proxy
+                logger.debug(f"CinemaCity: Passing explicit proxy to solver: {solver_proxy}")
 
         if post_data: payload["postData"] = post_data
 
@@ -68,6 +78,7 @@ class CinemaCityExtractor:
                 async with session.post(
                     endpoint,
                     json=payload,
+                    headers=fs_headers,
                     timeout=aiohttp.ClientTimeout(total=self.flaresolverr_timeout + 95),
                 ) as resp:
                     if resp.status != 200:
@@ -197,7 +208,13 @@ class CinemaCityExtractor:
         }
 
         # Use SmartRequest (Direct or FlareSolverr fallback)
-        result = await smart_request("request.get", url, headers=headers, proxies=self.proxies)
+        result = await smart_request(
+            "request.get",
+            url,
+            headers=headers,
+            proxies=self.proxies,
+            bypass_warp=True,
+        )
         html = result.get("html", "")
         dynamic_cookies = result.get("cookies", {})
 

@@ -23,6 +23,8 @@ class ManifestRewriter:
         stream_headers: dict,
         clearkey_param: str = None,
         api_password: str = None,
+        bypass_warp: bool = False,
+        disable_ssl: bool = False,
     ) -> str:
         """Riscrive i manifest MPD (DASH) per passare attraverso il proxy."""
         try:
@@ -54,6 +56,12 @@ class ManifestRewriter:
 
             if api_password:
                 header_params += f"&api_password={api_password}"
+            
+            if bypass_warp:
+                header_params += "&warp=off"
+
+            if disable_ssl:
+                header_params += "&disable_ssl=1"
 
             def create_proxy_url(relative_url):
                 # Skip proxying if URL contains DASH template variables - player must resolve these
@@ -196,6 +204,9 @@ class ManifestRewriter:
         get_extractor_func=None,
         no_bypass: bool = False,
         shorten_url_func=None,
+        bypass_warp: bool = False,
+        disable_ssl: bool = False,
+        selected_proxy: str = None,
     ) -> str:
         """Riscrive gli URL nei manifest HLS per passare attraverso il proxy."""
         lines = manifest_content.split("\n")
@@ -259,6 +270,16 @@ class ManifestRewriter:
 
             if api_password:
                 header_params += f"&api_password={api_password}"
+            
+            if bypass_warp:
+                header_params += "&warp=off"
+            
+            if disable_ssl:
+                header_params += "&disable_ssl=1"
+            
+            if selected_proxy:
+                # Usiamo un formato pulito per evitare double-encoding
+                header_params += f"&proxy={urllib.parse.quote(selected_proxy, safe='')}"
 
             absolute_variant_url = urljoin(base_url, highest_quality_stream["url"])
             if shorten_url_func:
@@ -269,6 +290,9 @@ class ManifestRewriter:
                 proxy_variant_url = (
                     f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_variant_url}{header_params}"
                 )
+            
+            if selected_proxy and "&proxy=" not in proxy_variant_url:
+                proxy_variant_url += f"&proxy={urllib.parse.quote(selected_proxy, safe='')}"
 
             proxied_media_lines = []
             for line in lines:
@@ -329,6 +353,15 @@ class ManifestRewriter:
 
         if api_password:
             header_params += f"&api_password={api_password}"
+        
+        if bypass_warp:
+            header_params += "&warp=off"
+        
+        if disable_ssl:
+            header_params += "&disable_ssl=1"
+        
+        if selected_proxy:
+            header_params += f"&proxy={urllib.parse.quote(selected_proxy, safe='')}"
 
         # Estrai query params dal base_url per ereditarli se necessario
         base_parsed = urllib.parse.urlparse(base_url)
@@ -368,6 +401,12 @@ class ManifestRewriter:
 
                     if api_password:
                         proxy_key_url += f"&api_password={api_password}"
+                    if bypass_warp:
+                        proxy_key_url += "&warp=off"
+                    if disable_ssl:
+                        proxy_key_url += "&disable_ssl=1"
+                    if selected_proxy:
+                        proxy_key_url += f"&proxy={urllib.parse.quote(selected_proxy, safe='')}"
 
                     new_line = line[:uri_start] + proxy_key_url + line[uri_end:]
                     rewritten_lines.append(new_line)
@@ -438,6 +477,10 @@ class ManifestRewriter:
                     proxy_key_url += header_params
                     if api_password:
                         proxy_key_url += f"&api_password={api_password}"
+                    if bypass_warp:
+                        proxy_key_url += "&warp=off"
+                    if disable_ssl:
+                        proxy_key_url += "&disable_ssl=1"
 
                     new_line = line[:uri_start] + proxy_key_url + line[uri_end:]
                     rewritten_lines.append(new_line)
